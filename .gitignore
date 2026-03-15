@@ -13,3 +13,5 @@ __pycache__
 log
 *.sql
 bot-env
+*.session
+config.json

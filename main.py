@@ -1,5 +1,8 @@
 #! /usr/bin/python3
 # -*- coding: utf-8 -*-
+import asyncio
+import pyrogram.utils
+pyrogram.utils.MIN_CHANNEL_ID = -10099999999999
 
 from bot import bot
 
@@ -11,5 +14,10 @@ from bot.modules.commands import *
 from bot.modules.extra import *
 from bot.modules.callback import *
 from bot.web import *
+from bot.sql_helper import init_db
 
+async def startup():
+    await init_db()
+
+asyncio.get_event_loop().run_until_complete(startup())
 bot.run()

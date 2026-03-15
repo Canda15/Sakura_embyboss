@@ -28,6 +28,7 @@ chanel = config.chanel
 bot_photo = config.bot_photo
 _open = config.open
 admins = config.admins
+registration_participants = set()
 sakura_b = config.money
 ranks = config.ranks
 prefixes = ['/', '!', '.', '，', '。']
@@ -130,6 +131,7 @@ owner_p = admin_p + [
     BotCommand("unbanall", "解除所有用户的禁用状态 [owner]"),
     BotCommand("banall", "禁用所有用户 [owner]"),
     BotCommand("paolu", "跑路!!!删除所有用户 [owner]"),
+    BotCommand("delnormal", "删除所有普通用户,保留白名单 [管理]"),
     BotCommand('restore_from_db', '恢复Emby账户[owner]'),
     BotCommand("config", "开启bot高级控制面板 [owner]"),
     BotCommand("embylibs_unblockall", "一键开启所有用户的媒体库 [owner]"),

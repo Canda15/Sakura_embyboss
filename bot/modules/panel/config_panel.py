@@ -49,7 +49,7 @@ async def partition_code_panel(_, call):
     text = (
         "【分区通行码管理】\n\n"
         f"当前分区与库：\n{parts_text}\n\n"
-        f"未使用分区码：{sql_count_partition_codes()}\n"
+        f"未使用分区码：{await sql_count_partition_codes()}\n"
         "请选择操作："
     )
     await editMessage(call, text, buttons=partition_code_menu_ikb())
@@ -100,12 +100,12 @@ def partition_code_view_page_ikb(page: int, total_pages: int):
 
 
 async def render_partition_code_view(call, page: int):
-    total_unused = sql_count_partition_codes()
+    total_unused = await sql_count_partition_codes()
     total_pages = max(1, (total_unused + PARTITION_VIEW_PAGE_SIZE - 1) // PARTITION_VIEW_PAGE_SIZE)
     page = max(1, min(page, total_pages))
     offset = (page - 1) * PARTITION_VIEW_PAGE_SIZE
 
-    unused = sql_list_partition_codes(limit=PARTITION_VIEW_PAGE_SIZE, offset=offset)
+    unused = await sql_list_partition_codes(limit=PARTITION_VIEW_PAGE_SIZE, offset=offset)
 
     unused_text = "\n".join([f"- `{i.code}` | {i.partition} | {i.duration_days}天" for i in unused]) if unused else "- 无"
 
@@ -179,7 +179,7 @@ async def partition_code_create(_, call):
         for c in codes
     ]
 
-    ok = sql_add_partition_codes(rows)
+    ok = await sql_add_partition_codes(rows)
     if not ok:
         return await editMessage(call, "❌ 创建分区通行码失败，请重试。", buttons=partition_code_menu_ikb())
 
@@ -222,7 +222,7 @@ async def partition_code_delete(_, call):
     if code == '/cancel':
         return await editMessage(call, '已取消删除。', buttons=partition_code_menu_ikb())
 
-    unused_deleted, used_deleted = sql_delete_partition_code_or_grant_by_code(code)
+    unused_deleted, used_deleted = await sql_delete_partition_code_or_grant_by_code(code)
     if unused_deleted == 0 and used_deleted == 0:
         return await editMessage(call, f"❌ 未找到 code：{code}", buttons=partition_code_menu_ikb())
 
@@ -246,7 +246,7 @@ async def partition_code_clear_unused(_, call):
 @bot.on_callback_query(filters.regex('^partition_code_action_clear_unused_confirm$') & admins_on_filter)
 async def partition_code_clear_unused_confirm(_, call):
     await callAnswer(call, "⚠️ 已确认，正在清理")
-    count = sql_clear_unused_partition_codes()
+    count = await sql_clear_unused_partition_codes()
     await editMessage(call, f"✅ 已清除未使用分区码：{count} 条", buttons=partition_code_menu_ikb())
 
 
@@ -263,7 +263,7 @@ async def partition_code_clear_used(_, call):
 @bot.on_callback_query(filters.regex('^partition_code_action_clear_used_confirm$') & admins_on_filter)
 async def partition_code_clear_used_confirm(_, call):
     await callAnswer(call, "⚠️ 已确认，正在清理")
-    count = sql_clear_used_partition_grants()
+    count = await sql_clear_used_partition_grants()
     await editMessage(call, f"✅ 已清除已使用记录：{count} 条", buttons=partition_code_menu_ikb())
 
 
@@ -280,7 +280,7 @@ async def partition_code_clear_all(_, call):
 @bot.on_callback_query(filters.regex('^partition_code_action_clear_all_confirm$') & admins_on_filter)
 async def partition_code_clear_all_confirm(_, call):
     await callAnswer(call, "⚠️ 已确认，正在清理")
-    count = sql_clear_all_partition_data()
+    count = await sql_clear_all_partition_data()
     await editMessage(
         call,
         f"✅ 已清除全部分区码：{count} 条",

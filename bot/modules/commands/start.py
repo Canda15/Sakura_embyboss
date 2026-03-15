@@ -21,9 +21,11 @@ from bot import bot, prefixes, group, bot_photo, ranks, sakura_b
 # 反命令提示
 @bot.on_message((filters.command('start', prefixes) | filters.command('count', prefixes)) & filters.chat(group))
 async def ui_g_command(_, msg):
+    user_id = getattr(msg.from_user, "id", msg.sender_chat.id if getattr(msg, "sender_chat", None) else 0)
+    user_name = getattr(msg.from_user, "first_name", msg.sender_chat.title if getattr(msg, "sender_chat", None) else "未知用户")
     await asyncio.gather(deleteMessage(msg),
                          sendMessage(msg,
-                                     f"🤖 亲爱的 [{msg.from_user.first_name}](tg://user?id={msg.from_user.id}) 这是一条私聊命令",
+                                     f"🤖 亲爱的 [{user_name}](tg://user?id={user_id}) 这是一条私聊命令",
                                      buttons=group_f, timer=60))
 
 
@@ -66,9 +68,9 @@ async def p_start(_, msg):
         else:
             await asyncio.gather(sendMessage(msg, '🤺 你也想和bot击剑吗 ?'), msg.delete())
     except (IndexError, TypeError):
-        exist_emby_data = sql_get_emby(msg.from_user.id)
+        exist_emby_data = await sql_get_emby(tg=msg.from_user.id)
         if not exist_emby_data:
-            sql_add_emby(msg.from_user.id)
+            await sql_add_emby(tg=msg.from_user.id)
         data = await members_info(tg=msg.from_user.id)
         if not data:
             return await sendMessage(msg, "❌ 出现错误，请稍后再试")

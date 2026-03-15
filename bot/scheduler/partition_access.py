@@ -20,7 +20,7 @@ async def check_partition_access():
     if not partition_libs:
         return
 
-    expired = sql_get_expired_grants(now)
+    expired = await sql_get_expired_grants(now)
     if not expired:
         return
 
@@ -28,12 +28,12 @@ async def check_partition_access():
     for grant in expired:
         by_user[grant.tg].append(grant)
 
-    active_map = sql_get_active_grants_for_users(list(by_user.keys()), now)
+    active_map = await sql_get_active_grants_for_users(list(by_user.keys()), now)
 
     processed_ids: List[int] = []
 
     for tg_id, grants in by_user.items():
-        emby_row = sql_get_emby(tg=tg_id)
+        emby_row = await sql_get_emby(tg=tg_id)
         if not emby_row or not emby_row.embyid:
             processed_ids.extend([g.id for g in grants])
             continue
@@ -77,4 +77,4 @@ async def check_partition_access():
 
         processed_ids.extend([g.id for g in grants])
 
-    sql_mark_grants_expired(processed_ids)
+    await sql_mark_grants_expired(processed_ids)

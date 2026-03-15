@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
-from sqlalchemy import BigInteger, Column, DateTime, Integer, String
+from sqlalchemy import BigInteger, Column, DateTime, Integer, String, select, update, delete
 
 from bot.sql_helper import Base, Session, engine
 
@@ -16,7 +16,7 @@ class PartitionCode(Base):
     created_at = Column(DateTime, default=datetime.now)
 
 
-PartitionCode.__table__.create(bind=engine, checkfirst=True)
+# PartitionCode.__table__.create(bind=engine, checkfirst=True)
 
 
 class PartitionGrant(Base):
@@ -33,52 +33,57 @@ class PartitionGrant(Base):
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
 
-PartitionGrant.__table__.create(bind=engine, checkfirst=True)
+# PartitionGrant.__table__.create(bind=engine, checkfirst=True)
 
 
-def sql_add_partition_codes(items: List[Dict]) -> bool:
+async def sql_add_partition_codes(items: List[Dict]) -> bool:
     """批量插入分区码记录。items 需包含 code/partition/duration_days/created_by/expires_at(optional)。"""
-    with Session() as session:
+    async with Session() as session:
         try:
             rows = [PartitionCode(**item) for item in items]
             session.add_all(rows)
-            session.commit()
+            await session.commit()
             return True
         except Exception:
-            session.rollback()
+            await session.rollback()
             return False
 
 
-def sql_get_partition_code(code: str) -> Optional[PartitionCode]:
-    with Session() as session:
-        return session.query(PartitionCode).filter(PartitionCode.code == code).first()
+async def sql_get_partition_code(code: str) -> Optional[PartitionCode]:
+    async with Session() as session:
+        result = await session.execute(select(PartitionCode).filter(PartitionCode.code == code))
+        record = result.scalars().first()
+        if record:
+            session.expunge(record)
+        return record
 
 
-def sql_delete_partition_code(code: str) -> bool:
+async def sql_delete_partition_code(code: str) -> bool:
     """使用后删除分区码，防止重复使用。"""
-    with Session() as session:
-        row = session.query(PartitionCode).filter(PartitionCode.code == code).first()
+    async with Session() as session:
+        result = await session.execute(select(PartitionCode).filter(PartitionCode.code == code))
+        row = result.scalars().first()
         if not row:
             return False
         try:
-            session.delete(row)
-            session.commit()
+            await session.delete(row)
+            await session.commit()
             return True
         except Exception:
-            session.rollback()
+            await session.rollback()
             return False
 
 
-def sql_upsert_partition_grant(tg: int, embyid: str, partition: str, expires_at: datetime, code: str = None) -> bool:
+async def sql_upsert_partition_grant(tg: int, embyid: str, partition: str, expires_at: datetime, code: str = None) -> bool:
     """插入或延长分区授权。若已有该用户同分区记录则延长到新的 expires_at (取较大者)。"""
-    with Session() as session:
+    async with Session() as session:
         try:
-            grant = (
-                session.query(PartitionGrant)
+            result = await session.execute(
+                select(PartitionGrant)
                 .filter(PartitionGrant.tg == tg, PartitionGrant.partition == partition)
                 .with_for_update()
-                .first()
             )
+            grant = result.scalars().first()
             if grant:
                 if expires_at > grant.expires_at:
                     grant.expires_at = expires_at
@@ -95,184 +100,206 @@ def sql_upsert_partition_grant(tg: int, embyid: str, partition: str, expires_at:
                     code=code,
                 )
                 session.add(grant)
-            session.commit()
+            await session.commit()
             return True
         except Exception:
-            session.rollback()
+            await session.rollback()
             return False
 
 
-def sql_get_active_grants_by_user(tg: int, now: datetime) -> List[PartitionGrant]:
-    with Session() as session:
-        return (
-            session.query(PartitionGrant)
+async def sql_get_active_grants_by_user(tg: int, now: datetime) -> List[PartitionGrant]:
+    async with Session() as session:
+        result = await session.execute(
+            select(PartitionGrant)
             .filter(
                 PartitionGrant.tg == tg,
                 PartitionGrant.status == "active",
                 PartitionGrant.expires_at > now,
             )
-            .all()
         )
+        grants = result.scalars().all()
+        for g in grants:
+            session.expunge(g)
+        return grants
 
 
-def sql_get_active_grants_for_users(user_ids: List[int], now: datetime) -> Dict[int, List[PartitionGrant]]:
+async def sql_get_active_grants_for_users(user_ids: List[int], now: datetime) -> Dict[int, List[PartitionGrant]]:
     if not user_ids:
         return {}
-    with Session() as session:
-        rows = (
-            session.query(PartitionGrant)
+    async with Session() as session:
+        result = await session.execute(
+            select(PartitionGrant)
             .filter(
                 PartitionGrant.tg.in_(user_ids),
                 PartitionGrant.status == "active",
                 PartitionGrant.expires_at > now,
             )
-            .all()
         )
-    result: Dict[int, List[PartitionGrant]] = {}
+        rows = result.scalars().all()
+        for r in rows:
+            session.expunge(r)
+    result_dict: Dict[int, List[PartitionGrant]] = {}
     for row in rows:
-        result.setdefault(row.tg, []).append(row)
-    return result
+        result_dict.setdefault(row.tg, []).append(row)
+    return result_dict
 
 
-def sql_get_expired_grants(now: datetime) -> List[PartitionGrant]:
-    with Session() as session:
-        return (
-            session.query(PartitionGrant)
+async def sql_get_expired_grants(now: datetime) -> List[PartitionGrant]:
+    async with Session() as session:
+        result = await session.execute(
+            select(PartitionGrant)
             .filter(
                 PartitionGrant.status == "active",
                 PartitionGrant.expires_at <= now,
             )
-            .all()
         )
+        grants = result.scalars().all()
+        for g in grants:
+            session.expunge(g)
+        return grants
 
 
-def sql_mark_grants_expired(ids: List[int]) -> None:
+async def sql_mark_grants_expired(ids: List[int]) -> None:
     if not ids:
         return
-    with Session() as session:
+    async with Session() as session:
         try:
-            session.query(PartitionGrant).filter(PartitionGrant.id.in_(ids)).update(
-                {PartitionGrant.status: "expired", PartitionGrant.updated_at: datetime.now()},
-                synchronize_session=False,
+            await session.execute(
+                update(PartitionGrant)
+                .where(PartitionGrant.id.in_(ids))
+                .values(status="expired", updated_at=datetime.now())
             )
-            session.commit()
+            await session.commit()
         except Exception:
-            session.rollback()
+            await session.rollback()
 
 
-def sql_list_partition_codes(limit: int = 50, offset: int = 0) -> List[PartitionCode]:
-    with Session() as session:
-        return (
-            session.query(PartitionCode)
+async def sql_list_partition_codes(limit: int = 50, offset: int = 0) -> List[PartitionCode]:
+    async with Session() as session:
+        result = await session.execute(
+            select(PartitionCode)
             .order_by(PartitionCode.created_at.desc())
             .offset(offset)
             .limit(limit)
-            .all()
         )
+        codes = result.scalars().all()
+        for c in codes:
+            session.expunge(c)
+        return codes
 
 
-def sql_list_partition_grants(limit: int = 50, offset: int = 0) -> List[PartitionGrant]:
-    with Session() as session:
-        return (
-            session.query(PartitionGrant)
+async def sql_list_partition_grants(limit: int = 50, offset: int = 0) -> List[PartitionGrant]:
+    async with Session() as session:
+        result = await session.execute(
+            select(PartitionGrant)
             .order_by(PartitionGrant.created_at.desc())
             .offset(offset)
             .limit(limit)
-            .all()
         )
+        grants = result.scalars().all()
+        for g in grants:
+            session.expunge(g)
+        return grants
 
 
-def sql_count_partition_codes() -> int:
-    with Session() as session:
-        return session.query(PartitionCode).count()
+async def sql_count_partition_codes() -> int:
+    async with Session() as session:
+        from sqlalchemy import func
+        result = await session.execute(select(func.count(PartitionCode.code)))
+        return result.scalar()
 
 
-def sql_count_partition_grants() -> int:
-    with Session() as session:
-        return session.query(PartitionGrant).count()
+async def sql_count_partition_grants() -> int:
+    async with Session() as session:
+        from sqlalchemy import func
+        result = await session.execute(select(func.count(PartitionGrant.id)))
+        return result.scalar()
 
 
-def sql_delete_partition_code_or_grant_by_code(code: str) -> Tuple[int, int]:
-    with Session() as session:
+async def sql_delete_partition_code_or_grant_by_code(code: str) -> Tuple[int, int]:
+    async with Session() as session:
         try:
             now = datetime.now()
-            unused_deleted = session.query(PartitionCode).filter(PartitionCode.code == code).delete(synchronize_session=False)
-            used_deleted = (
-                session.query(PartitionGrant)
-                .filter(
-                    PartitionGrant.code == code,
-                    ((PartitionGrant.status != "active") | (PartitionGrant.expires_at <= now)),
-                )
-                .delete(synchronize_session=False)
+            res1 = await session.execute(
+                delete(PartitionCode).where(PartitionCode.code == code)
             )
-            session.commit()
+            unused_deleted = res1.rowcount
+            res2 = await session.execute(
+                delete(PartitionGrant)
+                .where(PartitionGrant.code == code)
+                .where((PartitionGrant.status != "active") | (PartitionGrant.expires_at <= now))
+            )
+            used_deleted = res2.rowcount
+            await session.commit()
             return unused_deleted, used_deleted
         except Exception:
-            session.rollback()
+            await session.rollback()
             return 0, 0
 
 
-def sql_clear_unused_partition_codes() -> int:
-    with Session() as session:
+async def sql_clear_unused_partition_codes() -> int:
+    async with Session() as session:
         try:
-            count = session.query(PartitionCode).delete(synchronize_session=False)
-            session.commit()
+            result = await session.execute(delete(PartitionCode))
+            count = result.rowcount
+            await session.commit()
             return count
         except Exception:
-            session.rollback()
+            await session.rollback()
             return 0
 
 
-def sql_clear_used_partition_grants() -> int:
-    with Session() as session:
+async def sql_clear_used_partition_grants() -> int:
+    async with Session() as session:
         try:
             now = datetime.now()
-            count = (
-                session.query(PartitionGrant)
-                .filter((PartitionGrant.status != "active") | (PartitionGrant.expires_at <= now))
-                .delete(synchronize_session=False)
+            result = await session.execute(
+                delete(PartitionGrant)
+                .where((PartitionGrant.status != "active") | (PartitionGrant.expires_at <= now))
             )
-            session.commit()
+            count = result.rowcount
+            await session.commit()
             return count
         except Exception:
-            session.rollback()
+            await session.rollback()
             return 0
 
 
-def sql_clear_all_partition_data() -> int:
-    with Session() as session:
+async def sql_clear_all_partition_data() -> int:
+    async with Session() as session:
         try:
-            count = session.query(PartitionCode).delete(synchronize_session=False)
-            session.commit()
+            result = await session.execute(delete(PartitionCode))
+            count = result.rowcount
+            await session.commit()
             return count
         except Exception:
-            session.rollback()
-            return 0 
+            await session.rollback()
+            return 0
 
 
-def sql_redeem_partition_code_atomic(code: str, tg: int, embyid: str, now: datetime) -> Tuple[bool, Optional[str], Optional[datetime]]:
+async def sql_redeem_partition_code_atomic(code: str, tg: int, embyid: str, now: datetime) -> Tuple[bool, Optional[str], Optional[datetime]]:
     """
     原子化兑换分区码：同一事务内完成 校验码->写入/延长授权->删除分区码。
     返回 (ok, partition, expires_at)。
     """
-    with Session() as session:
+    async with Session() as session:
         try:
-            record = (
-                session.query(PartitionCode)
+            res1 = await session.execute(
+                select(PartitionCode)
                 .filter(PartitionCode.code == code)
                 .with_for_update()
-                .first()
             )
+            record = res1.scalars().first()
             if not record:
                 return False, None, None
 
             partition = record.partition
-            grant = (
-                session.query(PartitionGrant)
+            res2 = await session.execute(
+                select(PartitionGrant)
                 .filter(PartitionGrant.tg == tg, PartitionGrant.partition == partition)
                 .with_for_update()
-                .first()
             )
+            grant = res2.scalars().first()
 
             start_from = grant.expires_at if grant and grant.expires_at > now else now
             expires_at = start_from + timedelta(days=record.duration_days)
@@ -294,9 +321,9 @@ def sql_redeem_partition_code_atomic(code: str, tg: int, embyid: str, now: datet
                 )
                 session.add(grant)
 
-            session.delete(record)
-            session.commit()
+            await session.delete(record)
+            await session.commit()
             return True, partition, expires_at
         except Exception:
-            session.rollback()
+            await session.rollback()
             return False, None, None

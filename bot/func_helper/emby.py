@@ -314,7 +314,7 @@ class Embyservice(metaclass=Singleton):
             
             if new_password is None:
                 # 更新数据库记录为无密码
-                if sql_update_emby(Emby.embyid == emby_id, pwd=None):
+                if await sql_update_emby(Emby.embyid == emby_id, pwd=None):
                     LOGGER.info(f"成功重置密码为空: {emby_id}")
                     return True
                 else:
@@ -329,7 +329,7 @@ class Embyservice(metaclass=Singleton):
                     return False
                 
                 # 更新数据库
-                if sql_update_emby(Emby.embyid == emby_id, pwd=new_password):
+                if await sql_update_emby(Emby.embyid == emby_id, pwd=new_password):
                     LOGGER.info(f"成功重置密码: {emby_id}")
                     return True
                 else:

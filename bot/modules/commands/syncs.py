@@ -46,7 +46,7 @@ async def sync_emby_group(_, msg):
         LOGGER.info(f"{sign_name} 执行了群组成员同步任务")
         # 减少api调用
         members = [member.user.id async for member in bot.get_chat_members(group[0])]
-        r = get_all_emby(Emby.lv == 'b')
+        r = await get_all_emby(Emby.lv == 'b')
         if not r:
             return await send.edit("⚡群组同步任务\n\n结束！搞毛，没有人。")
         a = b = 0
@@ -56,13 +56,13 @@ async def sync_emby_group(_, msg):
             b += 1
             if i.tg not in members:
                 if await emby.emby_del(emby_id=i.embyid):
-                    sql_update_emby(Emby.embyid == i.embyid, embyid=None, name=None, pwd=None, pwd2=None, lv='d', cr=None,
+                    await sql_update_emby(Emby.embyid == i.embyid, embyid=None, name=None, pwd=None, pwd2=None, lv='d', cr=None,
                                     ex=None)
                     tem_deluser()
                     a += 1
                     reply_text = f'{b}. #id{i.tg} - [{i.name}](tg://user?id={i.tg}) 删除\n'
                     LOGGER.info(reply_text)
-                    sql_delete_emby(tg=i.tg)
+                    await sql_delete_emby(tg=i.tg)
                 else:
                     reply_text = f'{b}. #id{i.tg} - [{i.name}](tg://user?id={i.tg}) 删除错误\n'
                     LOGGER.error(reply_text)
@@ -119,9 +119,9 @@ async def sync_emby_unbound(_, msg):
                 if v['Policy'] and not bool(v['Policy']['IsAdministrator']):
                     embyid = v['Id']
                     # 查询无异常，并且无sql记录
-                    e = sql_get_emby(embyid)
+                    e = await sql_get_emby(embyid)
                     if e is None:
-                        e1 = sql_get_emby2(name=embyid)
+                        e1 = await sql_get_emby2(name=embyid)
                         if e1 is None:
                             a += 1
                             if confirm_delete:
@@ -167,15 +167,15 @@ async def bindall_id(_, msg):
         b += 1
         Name = i["Name"]
         Emby_id = i["Id"]
-        e = sql_get_emby(tg=Name)
+        e = await sql_get_emby(tg=Name)
         if not e:
             unknow_txt += f'{Name}\n'
             continue
         ls.append([e.tg, Name, Emby_id])
-    if sql_update_embys(some_list=ls, method='bind'):
+    if await sql_update_embys(some_list=ls, method='bind'):
         # 更新收藏记录
         for i in ls:
-           favorites_updated = sql_update_favorites(condition=EmbyFavorites.embyname == i[1], embyid=i[2])
+           favorites_updated = await sql_update_favorites(condition=EmbyFavorites.embyname == i[1], embyid=i[2])
            if not favorites_updated:
                LOGGER.warning(f"用户 {i[1]} 的收藏记录更新失败，可能存在数据冲突")
                pass
@@ -195,7 +195,7 @@ async def bindall_id(_, msg):
 @bot.on_message(filters.command('embyadmin', prefixes) & admins_on_filter)
 async def reload_admins(_, msg):
     await deleteMessage(msg)
-    e = sql_get_emby(tg=msg.from_user.id)
+    e = await sql_get_emby(tg=msg.from_user.id)
     if e.embyid is not None:
         await emby.emby_change_policy(emby_id=e.embyid, admin=True)
         LOGGER.info(f"{msg.from_user.first_name} - {msg.from_user.id} 开启了 emby 后台")
@@ -224,7 +224,7 @@ async def clear_deleted_account(_, msg):
                 # and d.is_member or any(keyword in l.user.first_name for keyword in keywords) 关键词检索，没模板不加了
                 if d.user.is_deleted:
                     await msg.chat.ban_member(d.user.id)
-                    sql_delete_emby(tg=d.user.id)
+                    await sql_delete_emby(tg=d.user.id)
                     a += 1
                     # 打个注释，scheduler 默认出群就删号了，不需要再执行删除
                     text += f'{a}. `{d.user.id}` 已注销\n'
@@ -248,7 +248,7 @@ async def kick_not_emby(_, msg):
     if open_kick == 'true':
         sign_name = f'{msg.sender_chat.title}' if msg.sender_chat else f'{msg.from_user.first_name}'
         LOGGER.info(f"{sign_name} 执行了踢出非emby用户的操作")
-        embyusers = get_all_emby(Emby.embyid is not None and Emby.embyid != '')
+        embyusers = await get_all_emby(Emby.embyid is not None and Emby.embyid != '')
         # get tgid
         embytgs = []
         if embyusers:
@@ -276,7 +276,7 @@ async def restore_from_db(_, msg):
         sign_name = f'{msg.sender_chat.title}' if msg.sender_chat else f'{msg.from_user.first_name}'    
         LOGGER.info(
             f"{sign_name} 执行了从数据库中恢复用户到Emby中的操作")
-        embyusers = get_all_emby(Emby.embyid is not None and Emby.embyid != '')
+        embyusers = await get_all_emby(Emby.embyid is not None and Emby.embyid != '')
         group_id = group[0]
         # 获取当前执行命令的群组成员
         chat_members = [member.user.id async for member in bot.get_chat_members(chat_id=group_id)]
@@ -298,10 +298,10 @@ async def restore_from_db(_, msg):
                         tg = embyuser.tg
                         embyid = data[0]
                         pwd = data[1]
-                        sql_update_emby(Emby.tg == tg, embyid=embyid, pwd=pwd)
+                        await sql_update_emby(Emby.tg == tg, embyid=embyid, pwd=pwd)
                         
                         # 更安全的收藏记录更新，带错误处理
-                        favorites_updated = sql_update_favorites(condition=EmbyFavorites.embyname == embyuser.name, embyid=embyid)
+                        favorites_updated = await sql_update_favorites(condition=EmbyFavorites.embyname == embyuser.name, embyid=embyid)
                         if not favorites_updated:
                             LOGGER.warning(f"用户 {embyuser.name} 的收藏记录更新失败，可能存在数据冲突")
                             text += f'**- ⚠️ 恢复用户：#id{embyuser.tg} - [{embyuser.name}](tg://user?id={embyuser.tg}) 成功，但收藏记录更新失败\n**'
@@ -348,7 +348,7 @@ async def scan_embyname(_, msg):
         f"{sign_name} 执行了扫描重复用户名操作")
 
     # 获取所有有效的emby用户
-    emby_users = get_all_emby(Emby.name is not None)
+    emby_users = await get_all_emby(Emby.name is not None)
     if not emby_users:
         return await send.edit("⚡扫描重复用户名任务\n\n结束！数据库中没有用户。")
 
@@ -405,7 +405,7 @@ async def unban_all_users(_, msg):
         success, allusers = await emby.users()
         if not success or allusers is None:
             return await send.edit("⚡解除禁用任务\n\n结束！获取 Emby 用户列表失败。")
-        allusers_in_db = get_all_emby(Emby.name is not None)
+        allusers_in_db = await get_all_emby(Emby.name is not None)
         
         unban_user_in_bot_count = unban_user_in_emby_count = index = 0
         text = ''
@@ -438,7 +438,7 @@ async def unban_all_users(_, msg):
                         continue
                     # 更新数据库状态为正常（lv='b'）
                     index += 1
-                    if sql_update_emby(Emby.tg == db_user.tg, lv='b'):
+                    if await sql_update_emby(Emby.tg == db_user.tg, lv='b'):
                         unban_user_in_bot_count += 1
                         reply_text = f'{index}. [{emby_name}](tg://user?id={db_user.tg}) - #id{db_user.tg} 解禁成功\n'
                         LOGGER.info(reply_text)
@@ -498,7 +498,7 @@ async def ban_all_users(_, msg):
         success, allusers = await emby.users()
         if not success or allusers is None:
             return await send.edit("⚡禁用所有用户任务\n\n结束！获取 Emby 用户列表失败。")
-        allusers_in_db = get_all_emby(Emby.name is not None)
+        allusers_in_db = await get_all_emby(Emby.name is not None)
         ban_user_in_bot_count = ban_user_in_emby_count = index = 0
         text = ''
         start = time.perf_counter()
@@ -531,7 +531,7 @@ async def ban_all_users(_, msg):
                         continue
                     index += 1
                     # 更新数据库状态为禁用（lv='c'）
-                    if sql_update_emby(Emby.tg == db_user.tg, lv='c'):
+                    if await sql_update_emby(Emby.tg == db_user.tg, lv='c'):
                         ban_user_in_bot_count += 1
                         reply_text = f'{index}. [{emby_name}](tg://user?id={db_user.tg}) - #id{db_user.tg} 禁用成功\n'
                         LOGGER.info(reply_text)
@@ -588,7 +588,7 @@ async def delete_all_users(_, msg):
         success, allusers = await emby.users()
         if not success or allusers is None:
             return await send.edit("⚡跑路命令任务\n\n结束！获取 Emby 用户列表失败。")
-        allusers_in_db = get_all_emby(Emby.name is not None)
+        allusers_in_db = await get_all_emby(Emby.name is not None)
         
         delete_user_in_emby_count = delete_user_in_bot_count = index = 0
         text = ''
@@ -612,9 +612,9 @@ async def delete_all_users(_, msg):
                         continue
                     # 优先使用tg（主键）删除，如果embyid存在也一起使用
                     if db_user.embyid:
-                        delete_result = sql_delete_emby(tg=db_user.tg, embyid=db_user.embyid)
+                        delete_result = await sql_delete_emby(tg=db_user.tg, embyid=db_user.embyid)
                     else:
-                        delete_result = sql_delete_emby(tg=db_user.tg)
+                        delete_result = await sql_delete_emby(tg=db_user.tg)
                     if delete_result:
                         delete_user_in_bot_count += 1
                         reply_text = f'{index}. [{emby_name}](tg://user?id={db_user.tg}) - #id{db_user.tg} 已删除\n'
@@ -645,3 +645,133 @@ async def delete_all_users(_, msg):
         else:
             await sendMessage(msg, text="**⚡跑路命令任务 结束！没有用户被删除。**")
         LOGGER.info(f"【跑路命令任务结束】 - {sign_name} 共检索出 {len(allusers)} 个 Emby 账户\n成功删除 {delete_user_in_emby_count} 个账户\n耗时：{times:.3f}s")
+
+
+@bot.on_message(filters.command('delnormal', prefixes) & admins_on_filter)
+async def delete_normal_users(_, msg):
+    """
+    一键删除普通用户命令：删除所有 lv='b' 的普通用户，保留白名单 (lv='a')
+    跳过 Emby 服务器中的管理员账户 (IsAdministrator)
+    需要确认：/delnormal true
+    """
+    await deleteMessage(msg)
+    try:
+        confirm_delete = msg.command[1]
+    except:
+        return await sendMessage(msg,
+                                 '⚠️ 注意: 此操作将**删除所有普通用户（lv=b）**，保留白名单用户。\n'
+                                 '如确定请输入 `/delnormal true`')
+
+    if confirm_delete == 'true':
+        sign_name = f'{msg.sender_chat.title}' if msg.sender_chat else f'{msg.from_user.first_name}'
+        LOGGER.info(f"{sign_name} 执行了删除普通用户命令")
+        send = await msg.reply("⚡删除普通用户任务\n  **正在执行中，请稍候...**", quote=True)
+
+        # 从数据库中获取所有 lv='b' 的普通用户
+        normal_users_in_db = await get_all_emby(Emby.lv == 'b')
+        if not normal_users_in_db:
+            return await send.edit("⚡删除普通用户任务\n\n结束！数据库中没有普通用户。")
+
+        # 从 Emby 库中查询出所有用户（用于检测管理员）
+        success, allusers = await emby.users()
+        if not success or allusers is None:
+            return await send.edit("⚡删除普通用户任务\n\n结束！获取 Emby 用户列表失败。")
+
+        # 构建 Emby 管理员 ID 集合，用于跳过
+        admin_emby_ids = set()
+        for emby_user in allusers:
+            if emby_user.get('Policy') and bool(emby_user['Policy'].get('IsAdministrator', False)):
+                admin_emby_ids.add(emby_user.get('Id'))
+
+        delete_user_in_emby_count = delete_user_in_bot_count = 0
+        skip_admin_count = 0
+        fail_count = 0
+        start = time.perf_counter()
+
+        for db_user in normal_users_in_db:
+            try:
+                emby_name = db_user.name
+                emby_id = db_user.embyid
+
+                if not emby_name or not emby_id:
+                    await sql_update_emby(Emby.tg == db_user.tg, lv='d', name=None, embyid=None,
+                                          pwd=None, pwd2=None, cr=None, ex=None)
+                    delete_user_in_bot_count += 1
+                    LOGGER.info(f'[delnormal] {db_user.tg} - 无Emby账户，已清理DB记录')
+                    continue
+
+                if emby_id in admin_emby_ids:
+                    skip_admin_count += 1
+                    LOGGER.info(f'[delnormal] {emby_name} - Emby管理员，跳过')
+                    continue
+
+                if await emby.emby_del(emby_id=emby_id):
+                    delete_user_in_emby_count += 1
+                    await sql_update_emby(Emby.tg == db_user.tg, lv='d', name=None, embyid=None,
+                                          pwd=None, pwd2=None, cr=None, ex=None)
+                    delete_user_in_bot_count += 1
+                    tem_deluser()
+                    LOGGER.info(f'[delnormal] {emby_name} #id{db_user.tg} 已删除')
+                else:
+                    fail_count += 1
+                    LOGGER.error(f'[delnormal] {emby_name} #id{db_user.tg} Emby删除失败')
+            except Exception as e:
+                fail_count += 1
+                LOGGER.error(f'[delnormal] 处理用户 {db_user.name or db_user.tg} 时异常: {e}')
+                continue
+
+        end = time.perf_counter()
+        times = end - start
+        summary = (f"**⚡删除普通用户任务 结束！**\n\n"
+                   f"共检索 {len(normal_users_in_db)} 个普通用户\n"
+                   f"✅ 成功删除 {delete_user_in_emby_count} 个\n"
+                   f"📝 清理DB记录 {delete_user_in_bot_count} 个\n"
+                   f"⏭️ 跳过管理员 {skip_admin_count} 个\n"
+                   f"❌ 失败 {fail_count} 个\n"
+                   f"⏱️ 耗时 {times:.3f}s")
+        await send.edit(summary)
+        LOGGER.info(f"【删除普通用户任务结束】 - {sign_name} {summary}")
+
+
+@bot.on_message(filters.command('delete_me', prefixes))
+async def delete_me_command(_, msg):
+    """
+    用户自主删号指令：跳过安全码，不删除用户原消息，保留直接回复
+    管理员(IsAdministrator)不可使用此指令删除自己
+    """
+    tgid = msg.from_user.id
+    
+    # 1. 查询数据库记录
+    db_user = await sql_get_emby(tg=tgid)
+    if not db_user or not db_user.embyid:
+        return await msg.reply("⚠️ 数据库中没有找到您的账户信息或您尚未绑定 Emby 账号。", quote=True)
+    
+    embyid = db_user.embyid
+    emby_name = db_user.name
+    
+    send = await msg.reply("🎯 收到删号请求，正在为您处理...", quote=True)
+    
+    # 2. 检查Emby该账号是否为管理员
+    success, emby_user_data = await emby.user(emby_id=embyid)
+    if success and emby_user_data:
+        if emby_user_data.get('Policy') and bool(emby_user_data['Policy'].get('IsAdministrator', False)):
+            return await send.edit("❌ 拒绝操作：您的账户属于**管理员**权限，为防止误操作，无法通过此快捷指令删除。请联系群管。")
+            
+    # 如果没查到该用户信息，也有可能是已经被别人删了，顺着往下走
+    
+    # 3. 尝试从Emby平台删除
+    if await emby.emby_del(emby_id=embyid):
+        # 4. 更新数据库，将其状态置为已注销 (lv='d' 并清空相关敏感数据)
+        await sql_update_emby(Emby.tg == tgid, embyid=None, name=None, pwd=None, pwd2=None, lv='d', cr=None, ex=None)
+        
+        # 5. 更新计数
+        from bot.func_helper.utils import tem_deluser
+        tem_deluser()
+        
+        await send.edit('🗑️ 好了，已经为您删除账户...\n愿来日各自安好，山高水长，我们有缘再见！')
+        LOGGER.info(f"【自主删除账号】：{tgid} ({emby_name}) 已成功删除自己！")
+    else:
+        await send.edit('🥧 糟糕，API处理失败了！请向管理反映。')
+        LOGGER.error(f"【自主删除账号】：{tgid} ({emby_name}) 删除失败！")
+
+

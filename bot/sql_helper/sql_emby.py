@@ -1,13 +1,11 @@
 """
 基本的sql操作
 """
-from bot.sql_helper import Base, Session, engine
 from sqlalchemy import Column, BigInteger, String, DateTime, Integer, case
 from sqlalchemy import func
-from sqlalchemy import or_
+from sqlalchemy import or_, select, update, delete
+from bot.sql_helper import Base, Session, engine
 from bot import LOGGER
-
-
 
 class Emby(Base):
     """
@@ -26,32 +24,34 @@ class Emby(Base):
     iv = Column(Integer, default=0)
     ch = Column(DateTime, nullable=True)
 
+# 异步模式下不能直接调用 Emby.__table__.create(bind=engine, checkfirst=True)
+# 被移入 init_db 中统一初始化
+# Emby.__table__.create(bind=engine, checkfirst=True)
 
-Emby.__table__.create(bind=engine, checkfirst=True)
-
-
-def sql_add_emby(tg: int):
+async def sql_add_emby(tg: int):
     """
     添加一条emby记录，如果tg已存在则忽略
     """
-    with Session() as session:
-        try:
-            emby = Emby(tg=tg)
-            session.add(emby)
-            session.commit()
-        except:
-            pass
+    async with Session() as session:
+        async with session.begin():
+            try:
+                emby = Emby(tg=tg)
+                session.add(emby)
+                await session.commit()
+            except:
+                pass
 
-def sql_delete_emby_by_tg(tg):
+async def sql_delete_emby_by_tg(tg):
     """
     根据tg删除一条emby记录
     """
-    with Session() as session:
+    async with Session() as session:
         try:
-            emby = session.query(Emby).filter(Emby.tg == tg).first()
+            result = await session.execute(select(Emby).filter(Emby.tg == tg))
+            emby = result.scalars().first()
             if emby:
-                session.delete(emby)
-                session.commit()
+                await session.delete(emby)
+                await session.commit()
                 LOGGER.info(f"删除数据库记录成功 {tg}")
                 return True
             else:
@@ -59,28 +59,29 @@ def sql_delete_emby_by_tg(tg):
                 return False
         except Exception as e:
             LOGGER.error(f"删除数据库记录时发生异常 {e}")
-            session.rollback()
+            await session.rollback()
             return False
 
-def sql_clear_emby_iv():
+async def sql_clear_emby_iv():
     """
     清除所有emby的iv
     """
-    with Session() as session:
+    async with Session() as session:
         try:
-            session.query(Emby).update({Emby.iv: 0})
-            session.commit()
+            await session.execute(update(Emby).values(iv=0))
+            await session.commit()
             return True
         except Exception as e:
             LOGGER.error(f"清除所有emby的iv时发生异常 {e}")
+            await session.rollback()
             return False
 
-def sql_delete_emby(tg=None, embyid=None, name=None):
+async def sql_delete_emby(tg=None, embyid=None, name=None):
     """
     根据tg, embyid或name删除一条emby记录
     至少需要提供一个参数，如果所有参数都为None，则返回False
     """
-    with Session() as session:
+    async with Session() as session:
         try:
             # 构建条件列表，只包含非None的参数
             conditions = []
@@ -100,158 +101,133 @@ def sql_delete_emby(tg=None, embyid=None, name=None):
             condition = or_(*conditions)
             LOGGER.debug(f"删除数据库记录，条件: tg={tg}, embyid={embyid}, name={name}")
             
-            # 用filter来过滤，使用with_for_update锁定记录
-            emby = session.query(Emby).filter(condition).with_for_update().first()
+            result = await session.execute(select(Emby).filter(condition).with_for_update())
+            emby = result.scalars().first()
             if emby:
                 LOGGER.info(f"删除数据库记录 {emby.name} - {emby.embyid} - {emby.tg}")
-                session.delete(emby)
+                await session.delete(emby)
                 try:
-                    session.commit()
+                    await session.commit()
                     LOGGER.info(f"成功删除数据库记录: tg={tg}, embyid={embyid}, name={name}")
                     return True
                 except Exception as e:
                     LOGGER.error(f"删除数据库记录时提交事务失败 {e}")
-                    session.rollback()
+                    await session.rollback()
                     return False
             else:
                 LOGGER.info(f"数据库记录不存在: tg={tg}, embyid={embyid}, name={name}")
                 return False
         except Exception as e:
             LOGGER.error(f"删除数据库记录时发生异常 {e}")
-            session.rollback()
+            await session.rollback()
             return False
 
-
-def sql_update_embys(some_list: list, method=None):
-    """ 根据list中的tg值批量更新一些值 ，此方法不可更新主键"""
-    with Session() as session:
+async def sql_update_embys(some_list: list, method=None):
+    """ 根据list中的tg值批量更新一些值 """
+    async with Session() as session:
         if method == 'iv':
             try:
-                mappings = [{"tg": c[0], "iv": c[1]} for c in some_list]
-                session.bulk_update_mappings(Emby, mappings)
-                session.commit()
+                for c in some_list:
+                    await session.execute(update(Emby).where(Emby.tg == c[0]).values(iv=c[1]))
+                await session.commit()
                 return True
             except:
-                session.rollback()
+                await session.rollback()
                 return False
         if method == 'ex':
             try:
-                mappings = [{"tg": c[0], "ex": c[1]} for c in some_list]
-                session.bulk_update_mappings(Emby, mappings)
-                session.commit()
+                for c in some_list:
+                    await session.execute(update(Emby).where(Emby.tg == c[0]).values(ex=c[1]))
+                await session.commit()
                 return True
             except:
-                session.rollback()
+                await session.rollback()
                 return False
         if method == 'bind':
             try:
-                # mappings = [{"name": c[0], "embyid": c[1]} for c in some_list] 没有主键不能插入的这是emby表
-                mappings = [{"tg": c[0], "name": c[1], "embyid": c[2]} for c in some_list]
-                session.bulk_update_mappings(Emby, mappings)
-                session.commit()
+                for c in some_list:
+                    await session.execute(update(Emby).where(Emby.tg == c[0]).values(name=c[1], embyid=c[2]))
+                await session.commit()
                 return True
             except Exception as e:
                 print(e)
-                session.rollback()
+                await session.rollback()
                 return False
 
-
-def sql_get_emby(tg):
+async def sql_get_emby(tg):
     """
     查询一条emby记录，可以根据tg, embyid或者name来查询
     """
-    with Session() as session:
+    async with Session() as session:
         try:
-            # 使用or_方法来表示或者的逻辑，如果有tg就用tg，如果有embyid就用embyid，如果有name就用name，如果都没有就返回None
-            emby = session.query(Emby).filter(or_(Emby.tg == tg, Emby.name == tg, Emby.embyid == tg)).first()
+            if isinstance(tg, int) or (isinstance(tg, str) and tg.isdigit()):
+                condition = or_(
+                    Emby.tg == int(tg),
+                    Emby.name == str(tg),
+                    Emby.embyid == str(tg)
+                )
+            else:
+                condition = or_(
+                    Emby.name == str(tg),
+                    Emby.embyid == str(tg)
+                )
+            result = await session.execute(select(Emby).filter(condition))
+            emby = result.scalars().first()
+            if emby:
+                # 显式地加载并 expunge 对像，使其可以在 session.commit() 之后访问
+                session.expunge(emby)
             return emby
         except:
             return None
 
-
-# def sql_get_emby_by_embyid(embyid):
-#     """
-#     Retrieve an Emby object from the database based on the provided Emby ID.
-#
-#     Parameters:
-#         embyid : The Emby ID used to identify the Emby object.
-#
-#     Returns:
-#         tuple: A tuple containing a boolean value indicating whether the retrieval was successful
-#                and the retrieved Emby object. If the retrieval was unsuccessful, the boolean value
-#                will be False and the Emby object will be None.
-#     """
-#     with Session() as session:
-#         try:
-#             emby = session.query(Emby).filter((Emby.embyid == embyid)).first()
-#             return True, emby
-#         except Exception as e:
-#             return False, None
-
-
-def get_all_emby(condition):
+async def get_all_emby(condition):
     """
     查询所有emby记录
     """
-    with Session() as session:
+    async with Session() as session:
         try:
-            embies = session.query(Emby).filter(condition).all()
+            result = await session.execute(select(Emby).filter(condition))
+            embies = result.scalars().all()
+            for emby in embies:
+                session.expunge(emby)
             return embies
         except:
             return None
 
-
-def sql_update_emby(condition, **kwargs):
+async def sql_update_emby(condition, **kwargs):
     """
     更新一条emby记录，根据condition来匹配，然后更新其他的字段
     """
-    with Session() as session:
+    async with Session() as session:
         try:
-            # 用filter来过滤，注意要加括号
-            emby = session.query(Emby).filter(condition).first()
+            result = await session.execute(select(Emby).filter(condition))
+            emby = result.scalars().first()
             if emby is None:
                 return False
-            # 然后用setattr方法来更新其他的字段，如果有就更新，如果没有就保持原样
             for k, v in kwargs.items():
                 setattr(emby, k, v)
-            session.commit()
+            await session.commit()
             return True
         except Exception as e:
             LOGGER.error(e)
             return False
 
-
-#
-# def sql_change_emby(name, new_tg):
-#     with Session() as session:
-#         try:
-#             emby = session.query(Emby).filter_by(name=name).first()
-#             if emby is None:
-#                 return False
-#             emby.tg = new_tg
-#             session.commit()
-#             return True
-#         except Exception as e:
-#             print(e)
-#             return False
-
-
-def sql_count_emby():
+async def sql_count_emby():
     """
     # 检索有tg和embyid的emby记录的数量，以及Emby.lv =='a'条件下的数量
-    # count = sql_count_emby()
     :return: int, int, int
     """
-    with Session() as session:
+    async with Session() as session:
         try:
-            # 使用func.count来计算数量，使用filter来过滤条件
-            count = session.query(
-                func.count(Emby.tg).label("tg_count"),
-                func.count(Emby.embyid).label("embyid_count"),
-                func.count(case((Emby.lv == "a", 1))).label("lv_a_count")
-            ).first()
+            result = await session.execute(
+                select(
+                    func.count(Emby.tg).label("tg_count"),
+                    func.count(Emby.embyid).label("embyid_count"),
+                    func.count(case((Emby.lv == "a", 1))).label("lv_a_count")
+                )
+            )
+            count = result.first()
         except Exception as e:
-            # print(e)
             return None, None, None
         else:
             return count.tg_count, count.embyid_count, count.lv_a_count

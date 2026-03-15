@@ -13,7 +13,7 @@ from bot.sql_helper.sql_partition import (
 async def _redeem_partition_code(code: str, tg_id: int):
     now = datetime.now()
 
-    record = sql_get_partition_code(code)
+    record = await sql_get_partition_code(code)
     if not record:
         return False, "❌ 分区码无效。"
 
@@ -22,11 +22,11 @@ async def _redeem_partition_code(code: str, tg_id: int):
         LOGGER.warning("分区码对应分区未配置库: %s", record.partition)
         return False, "⚠️ 分区未配置库，请联系管理员。"
 
-    emby_row = sql_get_emby(tg=tg_id)
+    emby_row = await sql_get_emby(tg=tg_id)
     if not emby_row or not emby_row.embyid:
         return False, "⚠️ 未找到您的 Emby 账户，请先完成注册绑定。"
 
-    ok, partition, expires_at = sql_redeem_partition_code_atomic(
+    ok, partition, expires_at = await sql_redeem_partition_code_atomic(
         code=code,
         tg=tg_id,
         embyid=emby_row.embyid,

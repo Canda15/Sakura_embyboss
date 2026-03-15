@@ -38,7 +38,7 @@ async def login_account(_, msg):
             LOGGER.error("【创建非tg账户】未知错误，检查是否重复id %s 或 emby状态" % name)
         else:
             embyid, pwd, ex = result
-            sql_add_emby2(embyid=embyid, name=name, cr=datetime.now(), ex=ex, pwd=pwd, pwd2=pwd)
+            await sql_add_emby2(embyid=embyid, name=name, cr=datetime.now(), ex=ex, pwd=pwd, pwd2=pwd)
             await send.edit(
                 f'**🎉 成功创建有效期{days}天 #{name}\n\n'
                 f'• 用户名称 | `{name}`\n'
@@ -63,18 +63,18 @@ async def urm_user(_, msg):
         return await asyncio.gather(editMessage(reply,
                                                 "🔔 **使用格式：**/urm [emby用户名]，此命令用于删除指定用户名的用户"),
                                     msg.delete())
-    e = sql_get_emby(tg=b)
+    e = await sql_get_emby(tg=b)
     stats = None
     if not e:
-        e2 = sql_get_emby2(name=b)
+        e2 = await sql_get_emby2(name=b)
         if not e2:
             return await reply.edit(f"♻️ 没有检索到 {b} 账户，请确认重试或手动检查。")
         e = e2
         stats = 1
 
     if await emby.emby_del(emby_id=e.embyid):
-        sql_update_emby(Emby.tg == e.tg, lv='d', name=None, embyid=None, cr=None,
-                        ex=None) if not stats else sql_delete_emby2(e.embyid)
+        await sql_update_emby(Emby.tg == e.tg, lv='d', name=None, embyid=None, cr=None,
+                        ex=None) if not stats else await sql_delete_emby2(e.embyid)
         try:
             await reply.edit(
                 f'🎯 done，管理员 [{msg.from_user.first_name}](tg://user?id={msg.from_user.id})\n'
@@ -106,9 +106,9 @@ async def uun_info(_, msg, name = None):
         return await asyncio.gather(msg.delete(), sendMessage(msg, "⭕ 用法：/uinfo + emby用户名或tgid 或回复用户消息"))
     else:
         text = ''
-        e = sql_get_emby(user_id)
+        e = await sql_get_emby(user_id)
         if not e:
-            e2 = sql_get_emby2(user_id)
+            e2 = await sql_get_emby2(user_id)
             if not e2:
                 return await sendMessage(msg, f'数据库中未查询到 {user_id}，请手动确认')
             e = e2
@@ -147,10 +147,10 @@ async def uun_info(_, msg, name = None):
 @bot.on_callback_query(filters.regex(r'^uinfo_disable-') & admins_on_filter)
 async def uinfo_disable_cb(_, call):
     embyid = call.data.split('-', 1)[1]
-    e = sql_get_emby(embyid)
+    e = await sql_get_emby(embyid)
     stats = None
     if not e:
-        e = sql_get_emby2(embyid)
+        e = await sql_get_emby2(embyid)
         if not e:
             return await callAnswer(call, "❌ 未找到该用户", show_alert=True)
         stats = 1
@@ -158,9 +158,9 @@ async def uinfo_disable_cb(_, call):
         return await callAnswer(call, "⚠️ 账户已是禁用状态", show_alert=True)
     if await emby.emby_change_policy(emby_id=embyid, disable=True):
         if stats:
-            sql_update_emby2(Emby2.embyid == embyid, lv='c')
+            await sql_update_emby2(Emby2.embyid == embyid, lv='c')
         else:
-            sql_update_emby(Emby.embyid == embyid, lv='c')
+            await sql_update_emby(Emby.embyid == embyid, lv='c')
         await call.message.edit_reply_markup(reply_markup=uinfo_ikb(embyid, 'c'))
         await callAnswer(call, f"✅ 账户 {e.name} 已禁用", show_alert=True)
         LOGGER.info(f"【uinfo】管理员通过 uinfo 禁用了账户 {e.name}[{embyid}]")
@@ -171,10 +171,10 @@ async def uinfo_disable_cb(_, call):
 @bot.on_callback_query(filters.regex(r'^uinfo_enable-') & admins_on_filter)
 async def uinfo_enable_cb(_, call):
     embyid = call.data.split('-', 1)[1]
-    e = sql_get_emby(embyid)
+    e = await sql_get_emby(embyid)
     stats = None
     if not e:
-        e = sql_get_emby2(embyid)
+        e = await sql_get_emby2(embyid)
         if not e:
             return await callAnswer(call, "❌ 未找到该用户", show_alert=True)
         stats = 1
@@ -182,9 +182,9 @@ async def uinfo_enable_cb(_, call):
         return await callAnswer(call, "⚠️ 账户当前未被禁用", show_alert=True)
     if await emby.emby_change_policy(emby_id=embyid, disable=False):
         if stats:
-            sql_update_emby2(Emby2.embyid == embyid, lv='b')
+            await sql_update_emby2(Emby2.embyid == embyid, lv='b')
         else:
-            sql_update_emby(Emby.embyid == embyid, lv='b')
+            await sql_update_emby(Emby.embyid == embyid, lv='b')
         await call.message.edit_reply_markup(reply_markup=uinfo_ikb(embyid, 'b'))
         await callAnswer(call, f"✅ 账户 {e.name} 已启用", show_alert=True)
         LOGGER.info(f"【uinfo】管理员通过 uinfo 启用了账户 {e.name}[{embyid}]")
@@ -195,9 +195,9 @@ async def uinfo_enable_cb(_, call):
 @bot.on_callback_query(filters.regex(r'^uinfo_delete-') & admins_on_filter)
 async def uinfo_delete_cb(_, call):
     embyid = call.data.split('-', 1)[1]
-    e = sql_get_emby(embyid)
+    e = await sql_get_emby(embyid)
     if not e:
-        e = sql_get_emby2(embyid)
+        e = await sql_get_emby2(embyid)
         if not e:
             return await callAnswer(call, "❌ 未找到该用户", show_alert=True)
     await call.message.edit_reply_markup(reply_markup=uinfo_delete_confirm_ikb(embyid))
@@ -207,19 +207,19 @@ async def uinfo_delete_cb(_, call):
 @bot.on_callback_query(filters.regex(r'^uinfo_delete_confirm-') & admins_on_filter)
 async def uinfo_delete_confirm_cb(_, call):
     embyid = call.data.split('-', 1)[1]
-    e = sql_get_emby(embyid)
+    e = await sql_get_emby(embyid)
     stats = None
     if not e:
-        e = sql_get_emby2(embyid)
+        e = await sql_get_emby2(embyid)
         if not e:
             return await callAnswer(call, "❌ 未找到该用户", show_alert=True)
         stats = 1
     name = e.name
     if await emby.emby_del(emby_id=embyid):
         if stats:
-            sql_delete_emby2(embyid)
+            await sql_delete_emby2(embyid)
         else:
-            sql_update_emby(Emby.embyid == embyid, lv='d', name=None, embyid=None, cr=None, ex=None)
+            await sql_update_emby(Emby.embyid == embyid, lv='d', name=None, embyid=None, cr=None, ex=None)
         try:
             await call.message.edit_caption(
                 caption=f"🗑️ 账户 **{name}** 已被管理员删除。",
@@ -238,9 +238,9 @@ async def uinfo_delete_confirm_cb(_, call):
 @bot.on_callback_query(filters.regex(r'^uinfo_delete_cancel-') & admins_on_filter)
 async def uinfo_delete_cancel_cb(_, call):
     embyid = call.data.split('-', 1)[1]
-    e = sql_get_emby(embyid)
+    e = await sql_get_emby(embyid)
     if not e:
-        e = sql_get_emby2(embyid)
+        e = await sql_get_emby2(embyid)
     lv = e.lv if e else None
     await call.message.edit_reply_markup(reply_markup=uinfo_ikb(embyid, lv))
     await callAnswer(call, "✅ 已取消删除")
@@ -266,7 +266,7 @@ async def user_cha_ip(_, msg, name = None):
     if not user_id:
         return await sendMessage(msg, "⭕ 用法：/userip + emby用户名或tgid 或回复用户消息")
 
-    e = sql_get_emby(user_id)
+    e = await sql_get_emby(user_id)
     if not e:
         return await sendMessage(msg, f"数据库中未查询到 {user_id}，请手动确认")
 
